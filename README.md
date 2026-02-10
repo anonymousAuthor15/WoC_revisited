@@ -1,6 +1,6 @@
 # Reproducing the Plots
 
-This repository contains the code used to reproduce the figures in the paper.
+This repository contains the code used to reproduce the figures in our paper "Social influence and collective wisdom in sequential estimation".
 
 ## Dependencies
 
