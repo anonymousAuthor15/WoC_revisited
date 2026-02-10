@@ -3,7 +3,6 @@ import pandas as pd
 
 import matplotlib.pyplot as plt
 from matplotlib import colormaps
-from matplotlib.colors import ListedColormap, BoundaryNorm, to_hex
 import seaborn as sns
 
 from scipy.stats import norm, linregress, skew, gmean
@@ -22,8 +21,8 @@ palette = {'Consensus': 'hotpink', 'Control': 'gray', 'Most recent': 'orange', '
 # load experiment data
 df = pd.read_pickle('../experiment_data/crowd_full.pkl')
 
-tasks = pd.read_csv('../experiment_data/tasks.csv.zip')  # Ensure the correct path
-domains = pd.read_csv('../experiment_data/domains.csv.zip')
+tasks = pd.read_csv('../experiment_data/original/tasks.csv.zip')  # Ensure the correct path
+domains = pd.read_csv('../experiment_data/original/domains.csv.zip')
 
 # simple get functions to retrieve data for a given task_id and condition
 def get_prompt(task_id):
@@ -42,6 +41,13 @@ def get_answers(task_id, condition='Control', df=df):
         print("Wrong task_id, condition or data type", e)
         return None
     
+def domain_func(domain, func, **kwargs):
+    task_ids = df[df['domain_name'] == domain]['task_id'].unique()
+    results = {}
+    for task_id in task_ids:
+        results[int(task_id)] = func(task_id, **kwargs)
+    return results
+
 # build a dictionary with precomputed info for each task and condition
 def build_task_params_df(df=df, c_tolerance=0, cutoff=5, normalization="perc"):
     """
@@ -878,6 +884,38 @@ def estimate_lambda(task_ids, method='ks', return_debug=1, plot=False, ax=None):
                 }
     return best_lambda
 
+def build_lambda_fitting_dict(load=True):
+    if load:
+        try:
+            lambda_fitting_dict = load_from_file('data/lambda_fitting_per_domain_and_task.json')
+            # load keys as int
+            lambda_fitting_dict = {domain: {int(k) if k.isdigit() else k: v for k, v in task_dict.items()} for domain, task_dict in lambda_fitting_dict.items()}
+            print("Loaded precomputed lambda_fitting_dict from disk.")
+            return lambda_fitting_dict
+        except Exception as e:
+            print("Error loading precomputed lambda_fitting_dict:", e)
+    
+    lambda_fitting_dict = {}
+
+    print("Building lambda_fitting_dict from scratch...")
+    for domain in df['domain_name'].unique():
+        task_ids = df[df['domain_name'] == domain]['task_id'].unique()
+        lambda_fitting_dict[domain] = {}
+        for method_name, method_dict in methods.items():
+            est = method_dict['func'](task_ids)
+            lambda_fitting_dict[domain][method_name] = est['best_lambda']
+
+        for task in task_ids:
+            task = int(task)
+            task_est = {}
+            for method_name, method_dict in methods.items():
+                est_method = method_dict['func']([task])
+                task_est[method_name] = est_method['best_lambda']
+            lambda_fitting_dict[domain][task] = task_est
+
+    save_to_json(lambda_fitting_dict, 'data/lambda_fitting_per_domain_and_task')
+    return lambda_fitting_dict
+
 methods = {
         'wasserstein': {'func': lambda x: estimate_lambda(x, method='wasserstein'),
                         'color': '#f78fa7'},
@@ -992,13 +1030,10 @@ def get_short_prompt(task_id):
 def multi_task_plot_norm_horizontal(
     dom,
     N=20,
-    nodups=False,
     cutoff=5,
     normalization="perc",
-    conf=None,
     plot=False,
     log_medians=False,          # NEW: log-scale only for the task median trajectories
-    log_eps=1e-8,               # NEW: numerical guard for log
 ):
     """
     Plot normalized predictions for multiple tasks in a domain (horizontal layout).
@@ -1032,10 +1067,6 @@ def multi_task_plot_norm_horizontal(
     """
     task_ids = df[df["domain_name"] == dom]["task_id"].unique()
 
-    limit_color = "#E0088D"
-    interval_color = "#760879"
-    wrong_color = "#0E25A4"
-
     fig, ax = plt.subplots(figsize=(min(len(task_ids), N) * 0.6, 5))
 
     # Domain-level predicted band (in percentile space)
@@ -1045,13 +1076,13 @@ def multi_task_plot_norm_horizontal(
         [-1, min(N, len(task_ids))],
         dom_lower,
         dom_upper,
-        color=methods["dom"]["color"],
+        color="#88C5AEFF",
         alpha=0.1,
         label="Theory prediction range",
     )
 
     ticklabels = []
-    corrects = outside_init = pred_outside = correct_ctrl = dom_corrects = 0
+    correct_ctrl = 0
 
     def log_transform(vals):
         if not log_medians:
@@ -1100,10 +1131,6 @@ def multi_task_plot_norm_horizontal(
         M_minus, M_plus = 1/2 - k / 2, 1/2 + k / 2
         ax.vlines(x, M_minus, M_plus, color="gray", linewidth=5, alpha=0.3)
 
-        # Plot control median trajectory (optionally log-transformed)
-        xvals_ctrl = np.linspace(x - 0.5, x, len(ctrl_med))
-        # print(f"Task {task_id} control xvals (log transformed={log_medians}): {xvals_ctrl}")
-        # print("Transformed xvals:", log_transform(xvals_ctrl))
         ax.plot(
             # log_transform(xvals_ctrl),
             log_transform2(x - 0.5, x, len(ctrl_med)),
@@ -1115,8 +1142,6 @@ def multi_task_plot_norm_horizontal(
             label="Control" if idx == 0 else "",
         )
 
-        # Plot consensus median trajectory (optionally log-transformed)
-        xvals_cons = np.linspace(x - 0.5, x, len(cons_med))
         ax.plot(
             log_transform2(x - 0.5, x, len(cons_med)),
             cons_med,
@@ -1188,8 +1213,7 @@ def multi_task_plot_norm_horizontal(
         plt.show()
     else:
         os.makedirs("./plots/horizontal_intervals", exist_ok=True)
-        suffix = f"{dom}_{normalization}{'_logmed' if log_medians else ''}.png"
-        plt.savefig(f"./plots/horizontal_intervals/{suffix}", dpi=300, bbox_inches="tight")
+        plt.savefig(f"./plots/horizontal_intervals/{dom}", dpi=300, bbox_inches="tight")
 
     plt.close()
 

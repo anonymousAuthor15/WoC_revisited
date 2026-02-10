@@ -16,7 +16,7 @@ def remove_outliers(df, z_thresh=5):
     return df[~outlier_mask]
 
 # Load the cleaned data from the pickle file
-crowd = pd.read_pickle('../data/crowd.pkl')
+crowd = pd.read_pickle('../experiment_data/crowd.pkl')
 
 crowd['answer'] = pd.to_numeric(crowd['answer'], errors='coerce')
 crowd['correct_answer'] = pd.to_numeric(crowd['correct_answer'], errors='coerce')
@@ -37,7 +37,7 @@ crowd_no_outliers6 = remove_outliers(crowd, 6)
 crowd_no_outliers7 = remove_outliers(crowd, 7)
 
 # Save the filtered data to a new pickle file
-crowd.to_pickle('../data/crowd_full.pkl')
-crowd_no_outliers5.to_pickle('../data/crowd_no_outliers5.pkl')
-crowd_no_outliers6.to_pickle('../data/crowd_no_outliers6.pkl')
-crowd_no_outliers7.to_pickle('../data/crowd_no_outliers7.pkl')
+crowd.to_pickle('../experiment_data/crowd_full.pkl')
+crowd_no_outliers5.to_pickle('../experiment_data/crowd_no_outliers5.pkl')
+crowd_no_outliers6.to_pickle('../experiment_data/crowd_no_outliers6.pkl')
+crowd_no_outliers7.to_pickle('../experiment_data/crowd_no_outliers7.pkl')

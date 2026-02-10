@@ -59,11 +59,11 @@ def clean_data(df_orig):
 
 
 # Load datasets
-domains = pd.read_csv('../data/domains.csv.zip')
-tasks = pd.read_csv('../data/tasks.csv.zip')
-answers = pd.read_csv('../data/answers.csv.zip')
-users = pd.read_csv('../data/users.csv')
-ranks = pd.read_csv('../data/predicted_ranks.csv')
+domains = pd.read_csv('../experiment_data/original/domains.csv.zip')
+tasks = pd.read_csv('../experiment_data/original/tasks.csv.zip')
+answers = pd.read_csv('../experiment_data/original/answers.csv.zip')
+users = pd.read_csv('../experiment_data/original/users.csv')
+ranks = pd.read_csv('../experiment_data/original/predicted_ranks.csv')
 
 # Merge datasets
 df_crowd = answers.merge(tasks, on='task_id', how='left')
@@ -84,4 +84,4 @@ df_crowd['is_correct'] = np.where(df_crowd['answer_type'] == 'open-ended', np.na
 crowd = clean_data(df_crowd)
 
 # Save the cleaned data
-crowd.to_pickle('../data/crowd.pkl')
+crowd.to_pickle('../experiment_data/crowd.pkl')

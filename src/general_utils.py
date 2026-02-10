@@ -203,13 +203,6 @@ def fit_percentiles(p, sorted_array, N=None):
         raise ValueError(f"Percentile calculation error: x0={x0}, intermediate={intermediate}, x1={x1}")
     return intermediate
 
-def domain_func(domain, func, **kwargs):
-    task_ids = df[df['domain_name'] == domain]['task_id'].unique()
-    results = {}
-    for task_id in task_ids:
-        results[int(task_id)] = func(task_id, **kwargs)
-    return results
-
 def percentile_score(point, correct, data):
     if isinstance(data, int):
         answers = get_answers(data)
@@ -420,3 +413,134 @@ def myboxplot(x=None,
     ax.grid(True, axis="y", alpha=0.25)
     ax.legend(handles=ax._myboxplot_legend, loc="lower left", frameon=True)
     # fig.tight_layout()
+
+
+# models of users
+class User():
+    mu_lmbda, sigma_lmbda = 0.3, 0.1  # Default parameters for the beta distribution
+    mu_r, sigma_r = 0.5, 0.2  # Default parameters for the beta distribution
+    a, b = 2, 3
+
+    def __init__(self, r=None, lmbda=None):
+        if lmbda is None: lmbda = np.clip(np.random.normal(User.mu_lmbda, User.sigma_lmbda), 0, 1)
+        self.lmbda = lmbda
+        if r is None: 
+            # r = np.clip(np.random.normal(self.mu_r, self.sigma_r), 0, 1)
+            r = np.random.normal(self.mu_r, self.sigma_r)
+        self.r = r
+
+    def vote(self, x):
+        """
+        Returns x with probability lmbda, and r with probability 1 - lmbda. 
+        """
+        return np.random.choice([x, self.r], p=[self.lmbda, 1 - self.lmbda])
+    
+    def vote_cvx(self, x):
+        """
+        Returns x with probability lmbda, and r with probability 1 - lmbda. 
+        """
+        return x*self.lmbda + self.r*(1 - self.lmbda) 
+    
+class BetaUser(User):  
+    def __init__(self, r=None, lmbda=None, a=None, b=None):
+        if lmbda is None: lmbda = np.clip(np.random.normal(User.mu_lmbda, User.sigma_lmbda), 0, 1)
+        self.lmbda = lmbda
+        if r is None: r = np.random.beta(get(a, User.a), get(b, User.b))
+        self.r = r
+
+class MixingUser():
+    mu_r, sigma_r = 0.5, 0.2
+    mu_c, mu_lmbda = 0.25, 0.3
+
+    def __init__(self, r=None, c=None, lmbda=None):
+        if lmbda is None: lmbda = MixingUser.mu_lmbda
+        if c is None: c = MixingUser.mu_c
+        self.lmbda, self.c = lmbda, c
+        self.r = r if r else np.random.normal(MixingUser.mu_r, MixingUser.sigma_r)
+
+    def vote(self, x):
+        return np.random.choice([x, self.lmbda*x + (1-self.lmbda)*self.r], p=[self.c, 1 - self.c])
+
+def simulation(users, init=None, seed=None, initial_users=3):
+    N = len(users)
+    votes = np.zeros(N + initial_users)
+    medians = np.zeros(N + initial_users)
+    heap_help = MedianHeaps()
+
+    np.random.seed()
+    for i in range(initial_users):
+        votes[i] = init if init is not None else User().r
+        heap_help.add_number(votes[i])
+        medians[i] = heap_help.get_median()
+
+    np.random.seed(seed)
+    for i in range(N):
+        votes[i + initial_users] = users[i].vote(medians[i + initial_users - 1])
+        heap_help.add_number(votes[i + initial_users])
+        medians[i + initial_users] = heap_help.get_median()
+    
+    return {"answers": votes, "medians": medians, "lambda": [user.lmbda for user in users], "r": list(votes[:initial_users]) + [user.r for user in users]}
+
+def simulation_avg(users, init=None, vote_cvx=False, seed=None, initial_users=3):
+    N = len(users)
+    votes = np.zeros(N + initial_users)
+    avgs = np.zeros(N + initial_users)
+
+    np.random.seed()
+    for i in range(initial_users):
+        votes[i] = init if init is not None else User().r
+        avgs[i] = np.mean(votes[:i + 1])
+
+    np.random.seed(seed)
+    for i in range(N):
+        if vote_cvx:
+            votes[i + initial_users] = users[i].vote_cvx(avgs[i + initial_users - 1])
+        else:
+            votes[i + initial_users] = users[i].vote(avgs[i + initial_users - 1])
+        # Efficient running average update
+        avgs[i + initial_users] = (avgs[i + initial_users - 1] * (i + initial_users) + votes[i + initial_users]) / (i + initial_users + 1)
+    
+    return {"answers": votes, "avgs": avgs, "lambda": [user.lmbda for user in users], "r": list(votes[:initial_users]) + [user.r for user in users]}
+
+def simulation_geometric(users, init=None, seed=None, initial_users=3):
+    N = len(users)
+    votes = np.zeros(N + initial_users)
+    geometric_means = np.zeros(N + initial_users)
+
+    np.random.seed()
+    for i in range(initial_users):
+        votes[i] = init if init is not None else User().r
+        geometric_means[i] = np.median(votes[:i + 1])
+
+    np.random.seed(seed)
+    for i in range(N):
+        votes[i + initial_users] = users[i].vote(geometric_means[i + initial_users - 1])
+        geometric_means[i + initial_users] = np.median(votes[:i + initial_users + 1])
+    
+    return {"answers": votes, "gm": geometric_means, "lambda": [user.lmbda for user in users], "r": list(votes[:initial_users]) + [user.r for user in users]}
+
+def plot_simulation(simulation_data, ax=None, title=None, ans=False, reps=False, med=False, avg=False):
+    med_r = np.median(simulation_data["r"])
+    avg_r = np.mean(simulation_data["r"])
+    mu_lambda = np.mean(simulation_data["lambda"])
+    N = len(simulation_data["answers"])
+    if not ax:
+        plt.figure(figsize=(8, 4))
+        ax = plt.gca()
+    if med:
+        ax.plot([med_r]*(N), label='Independent median', color='black', linestyle='--', alpha=0.5)
+    if avg:
+        ax.plot([avg_r]*(N), label='Independent average', color='black', linestyle=':', alpha=0.5)
+    if ans:
+        ax.plot(simulation_data["answers"], label='Answers', color='blue', marker='o', alpha=0.3, linewidth=1.7, markersize=6)
+    if reps:
+        ax.plot(simulation_data["r"], label='Latent', color='#123456', marker='o', alpha=0.3, linewidth=1.7, markersize=6)
+    try:
+        ax.plot(simulation_data["avgs"], label='Averages', color='green', alpha=0.5, linewidth=2)
+    except KeyError:
+        ax.plot(simulation_data["medians"], label='Medians', color='red', alpha=0.5, linewidth=2)
+    ax.set_xlabel('User Index')
+    # ax.set_ylabel('')
+    ax.set_title(title if title else f'Simulation with E[r] = {np.mean(simulation_data["r"]):.2f}, E[lambda] = {mu_lambda:.2f}')
+    ax.legend()
+    ax.grid()
