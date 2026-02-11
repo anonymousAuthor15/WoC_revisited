@@ -55,18 +55,26 @@ def build_task_params_df(df=df, c_tolerance=0):
     """
     task_array = []
     all_tasks = df['task_id'].unique()
-    dict_help = load_from_file('data/task_params_with_last_update_sims.json')
+    
+    try:
+        dict_help = load_from_file('data/task_params_with_last_update_sims.json')
+    except Exception as e:
+        print("Error loading last update sims data, skipping those fields:", e)
+        dict_help = {}
+
+    disp = DisplayProgressBar(total=len(df['task_id'].unique()), prefix='Progress:', suffix='Complete', length=50)
 
     for task_id in all_tasks:
         try:
             # Store essential values
             params = task_params(task_id, df=df, c_tolerance=c_tolerance)
-            params['last_update_sims_domain'] = dict_help[str(task_id)]['last_update_sims_domain']
-            params['last_update_sims_lambda_zero'] = dict_help[str(task_id)]['last_update_sims_lambda_zero']
+            params['last_update_sims_domain'] = dict_help.get(str(task_id), {}).get('last_update_sims_domain', None)
+            params['last_update_sims_lambda_zero'] = dict_help.get(str(task_id), {}).get('last_update_sims_lambda_zero', None)
             task_array.append(params)
         except Exception as e:
             print(f"Error computing parameters for task {task_id}: {e}")
             continue
+        disp.update()
     
     res = pd.DataFrame(task_array)
     res.set_index('task_id', inplace=True)
@@ -208,7 +216,7 @@ def build_task_params(load=True):
 
 # build the task_params_df and dict at module load time for fast access in plotting and analysis functions
 c_tolerance = 0
-task_params_df = build_task_params(load=True)
+task_params_df = build_task_params(load=False)
 task_params_dict = task_params_df.to_dict(orient='index')
 
 def get_params(task_id, task_params_df=task_params_df):
@@ -830,8 +838,8 @@ methods = {
 
 def estimate_lambda(task_ids, method='wasserstein', return_debug=1, plot=False, ax=None):
     """
-Function to estimate the lambda parameter for a given set of task ids by comparing the control answers to the adjusted consensus answers 
-using a specified method (e.g. minimizing Wasserstein distance).
+    Function to estimate the lambda parameter for a given set of task ids by comparing the control answers to the adjusted consensus answers 
+    using a specified method (e.g. minimizing Wasserstein distance).
     
     :param task_ids: list of task ids to use for lambda estimation
     :param method: method to use for comparing control and adjusted consensus answers (default: 'wasserstein')
@@ -972,6 +980,21 @@ def sims_for_last_update(task_id, lambda_fitting_dict, N=100, num_simulations=50
         # print(f"Simulation {sim}: (c,λ)= ({params['c'], lambda_fitting_dict[get_domain_name(task_id)][task_id]['wasserstein']}), {sim_res['last_update']}")
     
     return {'last_updates': last_updates, 'avg_last_update': np.sum(np.arange(N+1) * last_updates) / num_simulations}
+
+
+lambda_fitting_dict = build_lambda_fitting_dict(load=True)
+
+try:
+    with open('data/task_params_with_last_update_sims.json', 'r') as f:
+        print("Loaded task_params_dict contains last update simulations from disk.")
+except:
+    print("Running simulations for last update times...")
+    disp = DisplayProgressBar(total=len(df['task_id'].unique()), prefix='Progress:', suffix='Complete', length=50)
+    for task in df['task_id'].unique():
+        disp.update()
+        task_params_dict[task]['last_update_sims_domain'] = sims_for_last_update(task, lambda_fitting_dict=lambda_fitting_dict, N=100, num_simulations=1000, domain=True)['avg_last_update']
+        task_params_dict[task]['last_update_sims_lambda_zero'] = sims_for_last_update(task, lambda_fitting_dict=lambda_fitting_dict, N=100, num_simulations=1000, domain=True, lambda_zero=True)['avg_last_update']
+    save_to_json(task_params_dict, 'data/task_params_with_last_update_sims')
 
 # Task SIC with trajectory
 def plot_sic_with_traj(task, saveto=None, ax=None, title=None, offset=0, bounds=None):
